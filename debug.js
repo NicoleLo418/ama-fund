@@ -21,7 +21,7 @@
 
   function log(msg) {
     const t = new Date();
-    lines.push(t.toTimeString().slice(0, 8) + ' ' + msg);
+    lines.push(t.toTimeString().slice(0, 8) + ' +' + Math.round(performance.now()) + 'ms ' + msg);
     while (lines.length > 30) lines.shift();
     if (box) box.textContent = lines.slice().reverse().join('\n');
   }

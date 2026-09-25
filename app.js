@@ -1,4 +1,4 @@
-/* 阿嬤基金記帳 — 前端（原生 JavaScript，不需要編譯）
+/* 基金記帳 — 前端（原生 JavaScript，不需要編譯）
  *
  * 結構：
  *   1. 設定與小工具
@@ -13,7 +13,14 @@
 
   // ===== 1. 設定與小工具 =====
   const CFG = window.APP_CONFIG || {};
-  const CATEGORIES = ['菜肉', '水果', '日用品', '醫療', '車資', '給阿嬤', '其他'];
+  const CATEGORIES = ['菜肉', '水果', '日用品', '醫療', '車資', '給零用錢', '其他'];
+
+  // 畫面上的稱呼：從試算表「設定」表的「管理人稱呼」「長輩稱呼」讀取（後端透過 me 回傳），
+  // 並存在手機裡，下次打開不用等後端就能顯示正確的稱呼
+  const LABELS_KEY = 'ama-fund.labels.v1';
+  const DEFAULT_LABELS = { manager: '大哥', elder: '阿母' };
+  let L = Object.assign({}, DEFAULT_LABELS);
+  const appTitle = () => L.elder + '基金記帳';
   const MAX_DIGITS = 6;
   const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -23,11 +30,11 @@
   const DEV_USERS = [
     { userId: 'dev-xiuhui', displayName: '秀慧（測試）' },
     { userId: 'dev-xiaomi', displayName: '小咪（測試）' },
-    { userId: 'dev-dad', displayName: '爸爸（測試）' },
+    { userId: 'dev-dad', displayName: '大哥（測試）' },
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26a';
+  const APP_VERSION = '2026-09-26b';
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
@@ -114,6 +121,8 @@
     return true;
   }
 
+  let liffReady = Promise.resolve(true);
+
   /** 每個請求都附上的身分資料（後端會向 LINE 驗證 idToken） */
   function authPayload() {
     if (DEV) return { dev: currentDevUser() };
@@ -135,6 +144,7 @@
   }
 
   async function apiOnce(action, data) {
+    await liffReady;
     const body = Object.assign({ action: action }, data || {}, authPayload());
     const ctrl = new AbortController();
     // Google 後端閒置後第一次回應可能要 30 秒以上，所以等久一點
@@ -181,7 +191,7 @@
   // ===== 4. 畫面 =====
   const state = {
     me: null,
-    tab: 'add',
+    tab: '', // 目前的分頁（'' ＝ 還沒顯示任何分頁）
     form: null,
     requestId: null, // 同一筆送出重試時沿用，避免重複記帳
   };
@@ -355,9 +365,9 @@
   // ----- 總覽 -----
   const TYPE_LABEL = {
     代墊: (e) => `${e.targetName} 代墊`,
-    付款: (e) => `爸爸付給 ${e.targetName}`,
-    支出: () => '爸爸支出',
-    領出: () => '從阿嬤帳戶領出',
+    付款: (e) => `${L.manager}付給 ${e.targetName}`,
+    支出: () => `${L.manager}支出`,
+    領出: () => `從${L.elder}帳戶領出`,
     盤點: () => '盤點現金',
   };
 
@@ -489,7 +499,7 @@
       </section>
 
       <section class="section card">
-        <div class="stat-label">爸爸手上的零用金（帳上應有）</div>
+        <div class="stat-label">${esc(L.manager)}手上的現金（帳上應有）</div>
         <div class="big-number">${money(d.fundBalance)} 元</div>
         ${stocktake}
       </section>
@@ -562,25 +572,84 @@
     if (t.dataset.modal && modalHandlers[t.dataset.modal]) return modalHandlers[t.dataset.modal]();
   });
 
+  // ----- 開啟速度 -----
+  // ready：從網頁開始載入到「記一筆」可以按的毫秒數；mode：cached＝已核准直接顯示、first＝等後端確認
+  const openInfo = { ready: null, mode: '' };
+
+  function markReady(mode) {
+    if (openInfo.ready !== null) return;
+    openInfo.ready = Math.round(performance.now());
+    openInfo.mode = mode;
+    dlog('畫面可用（' + mode + '）');
+  }
+
   async function start() {
     dlog('app.js 版本 ' + APP_VERSION + ' DEV=' + DEV);
     if (DEV) setupDevBar();
-    try {
-      if (!DEV && !(await initLiff())) return; // 正在跳轉到 LINE 登入
-    } catch (e) {
-      showFatal('連不上 LINE，請關掉再從群組重新打開');
-      return;
-    }
-    state.uid = currentUid();
-    if (isApprovedCached(state.uid)) {
-      // 已核准過：「記一筆」不需要等後端，先顯示；同時在背景叫醒後端、取得自己的資料
+    applyLabels(loadJSON(LABELS_KEY));
+
+    // 已核准過的人：連 LINE 登入都不等，「記一筆」馬上顯示；登入與身分確認在背景做。
+    // （後端每次寫入/讀取都會再檢查核准狀態，安全性不變）
+    const guessUid = DEV ? currentDevUser().userId : loadJSON(LAST_UID_KEY);
+    let fast = isApprovedCached(guessUid);
+    if (fast) {
+      state.uid = guessUid;
       showTab('add');
+      markReady('cached');
+    }
+
+    if (!DEV) {
+      liffReady = initLiff();
+      let loggedIn;
+      try {
+        loggedIn = await liffReady;
+      } catch (e) {
+        showFatal('連不上 LINE，請關掉再從群組重新打開');
+        return;
+      }
+      if (!loggedIn) return; // 正在跳轉到 LINE 登入
+    }
+
+    const uid = currentUid();
+    saveJSON(LAST_UID_KEY, uid);
+    if (fast && uid !== state.uid) {
+      // 這支手機換了 LINE 帳號：改回「等後端確認」
+      dlog('LINE 帳號與上次不同，改為等後端確認');
+      fast = false;
+      state.tab = '';
+      $('#tabs').hidden = true;
+      $('#app').innerHTML = LOADING_FIRST;
+    }
+    state.uid = uid;
+
+    if (fast) {
       loadMe(false);
     } else {
       // 第一次使用（或尚未核准）：要等後端確認身分，才決定顯示什麼
+      $('#app').innerHTML = LOADING_FIRST;
       await loadMe(true);
-      if (state.me && state.me.approved) showTab('add');
+      if (state.me && state.me.approved) {
+        showTab('add');
+        markReady('first');
+        const p = loadJSON(PERF_KEY); // 補上這次的「畫面可用」時間
+        if (p) saveJSON(PERF_KEY, Object.assign(p, { ready: openInfo.ready, mode: openInfo.mode }));
+      }
     }
+  }
+
+  const LAST_UID_KEY = 'ama-fund.lastUid.v1';
+  const LOADING_FIRST = `<div class="loading-page"><div class="spinner"></div>
+    <p>正在確認你的身分，請稍等…</p>
+    <p class="hint">第一次打開會比較久，之後就會很快。</p></div>`;
+
+  /** 套用稱呼：標題、以及目前畫面上用到稱呼的地方 */
+  function applyLabels(labels) {
+    const next = Object.assign({}, DEFAULT_LABELS, labels || {});
+    const changed = next.manager !== L.manager || next.elder !== L.elder;
+    L = next;
+    document.title = appTitle();
+    if (!state.tab || state.tab === 'pending') $('#page-title').textContent = appTitle();
+    return changed;
   }
 
   /** blocking = true：畫面還沒顯示任何東西，失敗時要整頁提示 */
@@ -590,7 +659,12 @@
     try {
       state.me = await api('me', perf ? { perf: perf } : {});
       // 記下這次打開等了多久，下次打開時交給後端寫進「效能紀錄」
-      saveJSON(PERF_KEY, { ms: Date.now() - t0, at: t0, idle: lastMeta.idle, script: lastMeta.script });
+      saveJSON(PERF_KEY, { ms: Date.now() - t0, at: t0, idle: lastMeta.idle, script: lastMeta.script,
+        ready: openInfo.ready, mode: openInfo.mode });
+      if (state.me.labels) {
+        saveJSON(LABELS_KEY, state.me.labels);
+        if (applyLabels(state.me.labels) && state.tab === 'overview') renderOverview();
+      }
       dlog('me 成功 role=' + state.me.role + ' 核准=' + state.me.approved + ' 花 ' + (Date.now() - t0) + 'ms');
       try { sessionStorage.removeItem('relogin'); } catch (e) { /* 忽略 */ }
       $('#who').textContent = '你好，' + state.me.name;
@@ -645,7 +719,7 @@
     saveJSON(OVERVIEW_KEY, null); // 不留帳務資料在手機上
     hideModal();
     $('#tabs').hidden = true;
-    $('#page-title').textContent = '阿嬤基金記帳';
+    $('#page-title').textContent = appTitle();
     const name = state.me && state.me.name ? esc(state.me.name) + '，' : '';
     $('#app').innerHTML = `
       <section class="section card pending-card">
