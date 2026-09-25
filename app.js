@@ -27,6 +27,8 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
+  const APP_VERSION = '2026-09-25b';
+  const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
@@ -93,6 +95,8 @@
   /** LINE 登入：成功回傳 true；需要跳轉去登入時回傳 false */
   async function initLiff() {
     await liff.init({ liffId: CFG.LIFF_ID });
+    dlog('liff.init 完成 inClient=' + liff.isInClient() + ' os=' + liff.getOS() + ' LINE=' + liff.getLineVersion() +
+      ' sdk=' + liff.getVersion() + ' context=' + JSON.stringify(liff.getContext() && liff.getContext().type));
     if (!liff.isLoggedIn()) {
       liff.login({ redirectUri: location.href });
       return false;
@@ -177,6 +181,7 @@
   }
 
   function showTab(id) {
+    dlog('showTab(' + id + ')');
     state.tab = id;
     renderTabs();
     const tab = TABS.find((t) => t.id === id) || TABS[0];
@@ -469,6 +474,7 @@
   document.addEventListener('click', (e) => {
     const t = e.target.closest('button');
     if (!t || t.disabled) return;
+    dlog('app 收到點擊 → ' + (t.dataset.tab ? 'tab=' + t.dataset.tab : t.dataset.cat || t.dataset.key || t.dataset.modal || t.id));
     if (t.dataset.tab) return showTab(t.dataset.tab);
     if (t.dataset.cat) return selectCategory(t.dataset.cat);
     if (t.dataset.key) return pressKey(t.dataset.key);
@@ -478,6 +484,7 @@
   });
 
   async function start() {
+    dlog('app.js 版本 ' + APP_VERSION + ' DEV=' + DEV);
     if (DEV) setupDevBar();
     try {
       if (!DEV && !(await initLiff())) return; // 正在跳轉到 LINE 登入
@@ -493,10 +500,12 @@
   async function loadMe() {
     try {
       state.me = await api('me');
+      dlog('me 成功 role=' + state.me.role);
       try { sessionStorage.removeItem('relogin'); } catch (e) { /* 忽略 */ }
       $('#who').textContent = '你好，' + state.me.name;
       renderTabs();
     } catch (e) {
+      dlog('me 失敗 ' + e.code + ' ' + e.message);
       if (!DEV && e.code === 'AUTH' && relogin()) return;
       // 網路不穩時先不打擾，送出時會再提示；登入或設定問題才整頁顯示
       if (e.code === 'AUTH' || e.code === 'CONFIG') showFatal(e.message);
