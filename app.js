@@ -27,7 +27,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-25c';
+  const APP_VERSION = '2026-09-26a';
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
@@ -167,13 +167,16 @@
       clearTimeout(slowTimer);
       document.querySelectorAll('.slow-hint').forEach((el) => { el.hidden = true; });
     }
+    lastMeta = { idle: json._idle, script: json._t ? json._t['程式總計'] : null };
     if (!json.ok) {
       const err = new Error(json.error || '系統出了點問題，請再按一次');
       err.code = json.code;
+      if (json.code === 'PENDING') showPending(); // 還沒核准（或被改回待核准）
       throw err;
     }
     return json.data;
   }
+  let lastMeta = {};
 
   // ===== 4. 畫面 =====
   const state = {
@@ -344,7 +347,8 @@
       renderAdd();
     } catch (e) {
       setModalBusy(false);
-      $('#modal-error').innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+      const box = $('#modal-error'); // 待核准時彈出視窗已被關掉
+      if (box) box.innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
     }
   }
 
@@ -567,24 +571,100 @@
       showFatal('連不上 LINE，請關掉再從群組重新打開');
       return;
     }
-    // 「記一筆」不需要等後端，先顯示；同時在背景叫醒後端、取得自己的資料
-    showTab('add');
-    loadMe();
+    state.uid = currentUid();
+    if (isApprovedCached(state.uid)) {
+      // 已核准過：「記一筆」不需要等後端，先顯示；同時在背景叫醒後端、取得自己的資料
+      showTab('add');
+      loadMe(false);
+    } else {
+      // 第一次使用（或尚未核准）：要等後端確認身分，才決定顯示什麼
+      await loadMe(true);
+      if (state.me && state.me.approved) showTab('add');
+    }
   }
 
-  async function loadMe() {
+  /** blocking = true：畫面還沒顯示任何東西，失敗時要整頁提示 */
+  async function loadMe(blocking) {
+    const perf = loadJSON(PERF_KEY);
+    const t0 = Date.now();
     try {
-      state.me = await api('me');
-      dlog('me 成功 role=' + state.me.role);
+      state.me = await api('me', perf ? { perf: perf } : {});
+      // 記下這次打開等了多久，下次打開時交給後端寫進「效能紀錄」
+      saveJSON(PERF_KEY, { ms: Date.now() - t0, at: t0, idle: lastMeta.idle, script: lastMeta.script });
+      dlog('me 成功 role=' + state.me.role + ' 核准=' + state.me.approved + ' 花 ' + (Date.now() - t0) + 'ms');
       try { sessionStorage.removeItem('relogin'); } catch (e) { /* 忽略 */ }
       $('#who').textContent = '你好，' + state.me.name;
-      renderTabs();
+      if (!state.me.approved) return showPending();
+      setApprovedCache(state.uid, true);
+      if (!blocking) renderTabs();
     } catch (e) {
       dlog('me 失敗 ' + e.code + ' ' + e.message);
+      if (e.code === 'PENDING') return; // showPending 已處理
       if (!DEV && e.code === 'AUTH' && relogin()) return;
-      // 網路不穩時先不打擾，送出時會再提示；登入或設定問題才整頁顯示
-      if (e.code === 'AUTH' || e.code === 'CONFIG') showFatal(e.message);
+      // 已核准過的人：網路不穩時先不打擾，送出時會再提示；登入或設定問題才整頁顯示
+      if (blocking || e.code === 'AUTH' || e.code === 'CONFIG') showFatal(e.message);
     }
+  }
+
+  // ----- 核准狀態 -----
+  const APPROVED_KEY = 'ama-fund.approved.v1';
+  const PERF_KEY = 'ama-fund.perf.v1';
+
+  function loadJSON(key) {
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
+  }
+
+  function saveJSON(key, value) {
+    try {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) { /* 存不了就算了 */ }
+  }
+
+  function currentUid() {
+    if (DEV) return currentDevUser().userId;
+    try { return (liff.getDecodedIDToken() || {}).sub || ''; } catch (e) { return ''; }
+  }
+
+  function isApprovedCached(uid) {
+    const list = loadJSON(APPROVED_KEY);
+    return !!uid && Array.isArray(list) && list.indexOf(uid) >= 0;
+  }
+
+  function setApprovedCache(uid, approved) {
+    if (!uid) return;
+    const list = (loadJSON(APPROVED_KEY) || []).filter((u) => u !== uid);
+    if (approved) list.push(uid);
+    saveJSON(APPROVED_KEY, list);
+  }
+
+  /** 待核准畫面：不能記帳、不能看總覽 */
+  function showPending() {
+    state.tab = 'pending';
+    setApprovedCache(state.uid, false);
+    saveJSON(OVERVIEW_KEY, null); // 不留帳務資料在手機上
+    hideModal();
+    $('#tabs').hidden = true;
+    $('#page-title').textContent = '阿嬤基金記帳';
+    const name = state.me && state.me.name ? esc(state.me.name) + '，' : '';
+    $('#app').innerHTML = `
+      <section class="section card pending-card">
+        <p class="pending-icon" aria-hidden="true">⏳</p>
+        <p class="pending-title">請等待管理員確認</p>
+        <p>${name}你好！<br>第一次使用，要先請管理員確認身分。</p>
+        <p>管理員確認好之後，按下面的按鈕就可以開始記帳。</p>
+        <button class="btn btn-primary" id="recheck">重新檢查</button>
+      </section>`;
+    $('#recheck').addEventListener('click', recheck);
+  }
+
+  async function recheck() {
+    const btn = $('#recheck');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>檢查中…';
+    await loadMe(true);
+    if (state.me && state.me.approved) showTab('add');
+    else if (state.tab === 'pending') showMessage('還沒確認', '管理員還沒確認，請晚一點再試。');
   }
 
   function showFatal(message) {
