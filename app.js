@@ -134,11 +134,13 @@
    *  寫入類動作都帶 requestId，就算第一次其實已寫入，重試也不會記成兩筆。 */
   async function api(action, data) {
     try {
+      apiTries = 1;
       return await apiOnce(action, data);
     } catch (e) {
       if (!e.retryable) throw e;
       dlog('api ' + action + ' 第一次失敗（' + e.detail + '），自動重試');
       await new Promise((r) => setTimeout(r, 800));
+      apiTries = 2;
       return apiOnce(action, data);
     }
   }
@@ -154,7 +156,7 @@
     }, 8000);
     let json;
     try {
-      const res = await fetch(CFG.GAS_URL, {
+      const res = await fetch(CFG.API_URL || CFG.GAS_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // 用 text/plain 避免 CORS 預檢
         body: JSON.stringify(body),
@@ -187,6 +189,7 @@
     return json.data;
   }
   let lastMeta = {};
+  let apiTries = 1; // 最近一次 api() 總共送了幾次（含自動重試）
 
   // ===== 4. 畫面 =====
   const state = {
@@ -660,7 +663,7 @@
       state.me = await api('me', perf ? { perf: perf } : {});
       // 記下這次打開等了多久，下次打開時交給後端寫進「效能紀錄」
       saveJSON(PERF_KEY, { ms: Date.now() - t0, at: t0, idle: lastMeta.idle, script: lastMeta.script,
-        ready: openInfo.ready, mode: openInfo.mode });
+        ready: openInfo.ready, mode: openInfo.mode, tries: apiTries });
       if (state.me.labels) {
         saveJSON(LABELS_KEY, state.me.labels);
         if (applyLabels(state.me.labels) && state.tab === 'overview') renderOverview();
