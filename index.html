@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>阿嬤基金記帳</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 開發模式工具列（只在電腦瀏覽器測試時出現） -->
+  <div id="devbar" class="devbar" hidden>
+    開發模式・目前身分：
+    <select id="dev-user"></select>
+  </div>
+
+  <header class="topbar">
+    <h1 id="page-title">阿嬤基金記帳</h1>
+    <div id="who" class="who"></div>
+  </header>
+
+  <main id="app">
+    <div class="loading-page">
+      <div class="spinner"></div>
+      <p>載入中，請稍等…</p>
+      <p class="hint slow-hint" hidden>網路比較慢，請再等一下…</p>
+    </div>
+  </main>
+
+  <nav id="tabs" class="tabs" hidden></nav>
+
+  <!-- 彈出視窗（確認、成功、錯誤） -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-box" id="modal-box"></div>
+  </div>
+
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
