@@ -27,7 +27,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-25b';
+  const APP_VERSION = '2026-09-25c';
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
@@ -121,7 +121,20 @@
   }
 
   // ===== 3. 呼叫後端 API =====
+  /** 呼叫後端。Google 偶爾會回錯誤網頁而不是資料，這時自動重試一次。
+   *  寫入類動作都帶 requestId，就算第一次其實已寫入，重試也不會記成兩筆。 */
   async function api(action, data) {
+    try {
+      return await apiOnce(action, data);
+    } catch (e) {
+      if (!e.retryable) throw e;
+      dlog('api ' + action + ' 第一次失敗（' + e.detail + '），自動重試');
+      await new Promise((r) => setTimeout(r, 800));
+      return apiOnce(action, data);
+    }
+  }
+
+  async function apiOnce(action, data) {
     const body = Object.assign({ action: action }, data || {}, authPayload());
     const ctrl = new AbortController();
     // Google 後端閒置後第一次回應可能要 30 秒以上，所以等久一點
@@ -137,9 +150,18 @@
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });
-      json = await res.json();
+      const text = await res.text();
+      try {
+        json = JSON.parse(text);
+      } catch (e) {
+        throw Object.assign(new Error('網路不穩，請再按一次'), {
+          retryable: true, detail: 'HTTP ' + res.status + ' 非資料：' + text.slice(0, 60).replace(/s+/g, ' '),
+        });
+      }
     } catch (e) {
-      throw new Error('網路不穩，請再按一次');
+      if (e.retryable) throw e;
+      const timedOut = e.name === 'AbortError';
+      throw Object.assign(new Error('網路不穩，請再按一次'), { retryable: !timedOut, detail: e.name + ' ' + e.message });
     } finally {
       clearTimeout(timer);
       clearTimeout(slowTimer);
@@ -187,7 +209,11 @@
     const tab = TABS.find((t) => t.id === id) || TABS[0];
     $('#page-title').textContent = tab.label;
     window.scrollTo(0, 0);
-    tab.render();
+    Promise.resolve().then(tab.render).catch((e) => {
+      dlog('畫面 ' + id + ' 出錯：' + e.message);
+      $('#app').innerHTML = `<div class="error-box">讀取失敗，請再按一次</div>
+        <button class="btn btn-primary" data-tab="${id}">再試一次</button>`;
+    });
   }
 
   // ----- 記一筆 -----
@@ -347,35 +373,84 @@
   }
 
   // 上一次看到的總覽存在這支手機裡，下次打開先顯示，不用乾等後端
+  const OVERVIEW_KEY = 'ama-fund.overview.v1';
+
+  /** 檢查總覽資料的格式是否完整（缺欄位就不要拿來畫） */
+  function isOverview(d) {
+    return !!d && typeof d === 'object' && typeof d.month === 'string' &&
+      Array.isArray(d.members) && Array.isArray(d.monthCategories) && Array.isArray(d.recent);
+  }
+
+  function describeData(d) {
+    if (d === null || typeof d !== 'object') return typeof d + ' ' + String(d).slice(0, 80);
+    return 'keys=' + Object.keys(d).join(',');
+  }
+
   function loadSavedOverview() {
-    try { return JSON.parse(localStorage.getItem('overview') || 'null'); } catch (e) { return null; }
+    try {
+      // 舊版用的名稱：記錄內容以便診斷，然後清掉
+      const legacy = localStorage.getItem('overview');
+      if (legacy !== null) {
+        dlog('舊版存檔 overview（' + legacy.length + ' 字）：' + legacy.slice(0, 200));
+        localStorage.removeItem('overview');
+      }
+      const d = JSON.parse(localStorage.getItem(OVERVIEW_KEY) || 'null');
+      if (d && !isOverview(d)) {
+        dlog('手機存的總覽格式不對，丟掉：' + describeData(d));
+        localStorage.removeItem(OVERVIEW_KEY);
+        return null;
+      }
+      return d;
+    } catch (e) {
+      return null;
+    }
   }
 
   function saveOverview(d) {
-    try { localStorage.setItem('overview', JSON.stringify(d)); } catch (e) { /* 存不了就算了 */ }
+    try { localStorage.setItem(OVERVIEW_KEY, JSON.stringify(d)); } catch (e) { /* 存不了就算了 */ }
+  }
+
+  function showOverviewError(message) {
+    const box = `<div class="error-box">${esc(message)}</div>
+      <button class="btn btn-primary" id="retry">再試一次</button>`;
+    const status = $('#overview-status');
+    if (status) status.innerHTML = box;
+    else $('#app').innerHTML = box;
+    $('#retry').addEventListener('click', renderOverview);
+  }
+
+  /** 畫總覽；萬一資料有問題，顯示「讀取失敗」而不是卡住 */
+  function safeDrawOverview(d, updating) {
+    try {
+      drawOverview(d, updating);
+      return true;
+    } catch (e) {
+      dlog('drawOverview 失敗：' + e.message + ' 資料 ' + describeData(d));
+      return false;
+    }
   }
 
   async function renderOverview() {
     const app = $('#app');
     const saved = loadSavedOverview();
-    if (saved) drawOverview(saved, true);
-    else app.innerHTML = '<div class="loading-page"><div class="spinner"></div><p>載入中…</p><p class="hint slow-hint" hidden>網路比較慢，請再等一下…</p></div>';
+    const showedSaved = saved && safeDrawOverview(saved, true);
+    if (!showedSaved) app.innerHTML = '<div class="loading-page"><div class="spinner"></div><p>載入中…</p><p class="hint slow-hint" hidden>網路比較慢，請再等一下…</p></div>';
 
     let d;
     try {
       d = await api('overview');
     } catch (e) {
-      if (state.tab !== 'overview') return;
-      const box = `<div class="error-box">${esc(e.message)}</div>
-        <button class="btn btn-primary" id="retry">再試一次</button>`;
-      if (saved) $('#overview-status').innerHTML = box;
-      else app.innerHTML = box;
-      $('#retry').addEventListener('click', renderOverview);
+      if (state.tab === 'overview') showOverviewError(e.message);
+      return;
+    }
+    if (!isOverview(d)) {
+      dlog('後端回傳的總覽格式不對：' + describeData(d));
+      if (state.tab === 'overview') showOverviewError('讀取失敗，請再按一次');
       return;
     }
     saveOverview(d);
     if (state.tab !== 'overview') return; // 載入時已切到別的分頁
-    drawOverview(d, false);
+    if (!safeDrawOverview(d, false)) showOverviewError('讀取失敗，請再按一次');
   }
 
   /** updating = true：畫面是上次存的舊資料，最上面顯示「更新中」 */
