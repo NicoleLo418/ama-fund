@@ -37,7 +37,9 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26d';
+  const APP_VERSION = '2026-09-26e';
+  // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
+  const SEND_SUMMARY_ENABLED = false;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
@@ -211,18 +213,19 @@
   };
 
   function newForm(mode) {
-    return { mode: mode || 'claim', category: '', amount: '', note: '', date: today(), target: '' };
+    // payer：''＝還沒選、'self'＝管理人從現金付（支出）、其他＝代墊人的成員編號（代墊）
+    return { mode: mode || 'claim', category: '', amount: '', note: '', date: today(), target: '', payer: '' };
   }
 
   const isAdmin = () => !!(state.me && state.me.role === 'admin');
 
   const TABS = [
-    { id: 'add', icon: '✏️', label: () => '記一筆', render: () => renderAdd() },
-    { id: 'claims', icon: '🧾', label: () => '我的請款', render: () => renderClaims() },
-    { id: 'overview', icon: '📊', label: () => '總覽', render: () => renderOverview() },
-    { id: 'admin', icon: '🔑', label: () => L.manager + '專用', render: () => renderAdmin(), admin: true },
+    { id: 'add', icon: '✏️', label: () => '記一筆', render: () => renderAdd(), admin: true },
+    { id: 'summary', icon: '📋', label: () => '總表', render: () => renderSummary() },
+    { id: 'admin', icon: '🔑', label: () => '管理', render: () => renderAdmin(), admin: true },
   ];
   const visibleTabs = () => TABS.filter((t) => !t.admin || isAdmin());
+  const homeTab = () => (isAdmin() ? 'add' : 'summary');
 
   function renderTabs() {
     const nav = $('#tabs');
@@ -239,7 +242,8 @@
     state.tab = id;
     renderTabs();
     if (id === 'admin') state.adminView = 'home';
-    const tab = visibleTabs().find((t) => t.id === id) || TABS[0];
+    const tab = visibleTabs().find((t) => t.id === id) || visibleTabs()[0];
+    state.tab = tab.id;
     $('#page-title').textContent = tab.label();
     renderTestBanner();
     window.scrollTo(0, 0);
@@ -265,14 +269,16 @@
     const back = state.tab === 'admin'
       ? `<button class="btn back-btn" data-admin="home">← 回${esc(L.manager)}專用</button>` : '';
     const heading = { expense: L.manager + '記支出', withdraw: '從' + L.elder + '帳戶領錢', stocktake: '盤點手上的現金' }[f.mode];
-    const whoPicker = f.mode === 'claim' && isAdmin() ? `
+    const payers = (state.me && state.me.payers) || [];
+    const whoPicker = f.mode === 'claim' ? `
       <section class="section">
-        <h2 class="section-title">幫誰記？</h2>
-        <select class="text-input" id="target">
-          <option value="">自己（${esc(state.me.name)}）</option>
-          ${(state.members || []).filter((x) => x.userId !== state.me.userId).map((x) =>
-            `<option value="${esc(x.userId)}" ${x.userId === f.target ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
-        </select>
+        ${step('誰出的錢？')}
+        <button class="payer-btn payer-self" data-payer="self" aria-pressed="${f.payer === 'self'}">
+          ${esc(L.manager)}<span class="payer-sub">從現金付</span></button>
+        <div class="payer-grid">
+          ${payers.map((p) => `<button class="payer-btn" data-payer="${esc(p.userId)}" aria-pressed="${f.payer === p.userId}">
+            ${esc(p.name)}<span class="payer-sub">代墊</span></button>`).join('')}
+        </div>
       </section>` : '';
     $('#app').innerHTML = `
       ${back}
@@ -324,8 +330,7 @@
       $('#note').addEventListener('input', (e) => { f.note = e.target.value; });
       $('#note').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
     }
-    if ($('#target')) $('#target').addEventListener('change', (e) => { f.target = e.target.value; });
-    if (f.mode === 'claim' && isAdmin() && !state.members) loadMembers();
+
     $('#date').addEventListener('change', (e) => {
       f.date = e.target.value || today();
       $('#date-text').textContent = friendlyDate(f.date);
@@ -363,15 +368,27 @@
     } catch (e) { /* 選人清單拿不到就只能記自己 */ }
   }
 
+  function selectPayer(p) {
+    state.form.payer = p;
+    document.querySelectorAll('.payer-btn').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.payer === p)));
+  }
+
+  /** 記一筆：選管理人＝支出；選代墊人＝代墊（待付） */
+  function formType(f) {
+    if (f.mode !== 'claim') return MODES[f.mode].type;
+    return f.payer === 'self' ? '支出' : '代墊';
+  }
+
   function confirmAdd() {
     const f = state.form;
     const m = MODES[f.mode];
+    if (f.mode === 'claim' && !f.payer) return showMessage('還沒選誰出的錢', '請先按最上面「誰出的錢？」的其中一個按鈕。');
     if (m.category && !f.category) return showMessage('還沒選分類', '請先按上面「買了什麼？」的其中一個按鈕。');
     if (!f.amount) return showMessage('還沒輸入金額', '請用數字按鈕輸入金額。');
     if (!state.requestId) state.requestId = newRequestId();
 
-    const targetName = f.target ? ((state.members || []).find((x) => x.userId === f.target) || {}).name : '';
-    const what = { claim: (targetName ? targetName + ' 代墊・' : '') + f.category, expense: L.manager + '支出・' + f.category,
+    const payerName = f.payer && f.payer !== 'self' ? ((state.me.payers || []).find((x) => x.userId === f.payer) || {}).name : '';
+    const what = { claim: (f.payer === 'self' ? L.manager + '從現金付・' : payerName + ' 代墊・') + f.category, expense: L.manager + '支出・' + f.category,
       withdraw: '從' + L.elder + '帳戶領出', stocktake: '手上現金' }[f.mode];
     const noteLine = f.note.trim() ? `<br>（${esc(f.note.trim())}）` : '';
     showModal(`
@@ -396,27 +413,28 @@
     try {
       const result = await api('addEntry', {
         requestId: state.requestId,
-        type: MODES[f.mode].type,
+        type: formType(f),
         category: MODES[f.mode].category ? f.category : '',
         amount: Number(f.amount),
         note: f.note.trim(),
         date: f.date,
-        targetUserId: f.mode === 'claim' && f.target ? f.target : undefined,
+        targetUserId: formType(f) === '代墊' ? f.payer : undefined,
       });
       state.requestId = null;
       const mode = f.mode;
+      const type = formType(f);
       state.form = newForm(mode);
       const e = result.entry;
       let body;
-      if (mode === 'claim') {
+      if (type === '代墊') {
         if (state.me && e.targetUserId === state.me.userId) state.me.pendingTotal = result.pendingTotal;
-        body = `${esc(e.category)} ${money(e.amount)} 元<br><br>${esc(e.targetName)}目前還沒拿到：
+        body = `${esc(e.targetName)} 代墊 ${esc(e.category)} ${money(e.amount)} 元<br><br>${esc(L.manager)}還沒付${esc(e.targetName)}：
           <span class="modal-big">${money(result.pendingTotal)} 元</span>`;
       } else if (mode === 'stocktake') {
         const st = result.stocktake;
         body = `數到 ${money(st.counted)} 元<br>帳上應有 ${money(st.expected)} 元<br><br>${diffText(st.diff)}`;
       } else {
-        body = `${mode === 'expense' ? esc(e.category) + ' ' : ''}${money(e.amount)} 元<br><br>${esc(L.manager)}手上的現金（帳上）：
+        body = `${type === '支出' ? esc(e.category) + ' ' : ''}${money(e.amount)} 元<br><br>${esc(L.manager)}手上的現金（帳上）：
           <span class="modal-big">${money(result.fundBalance)} 元</span>`;
       }
       showModal(`
@@ -674,12 +692,12 @@
     state.pendingPeople = d.people;
     const st = d.lastStocktake;
     app.innerHTML = `
+      ${SEND_SUMMARY_ENABLED ? '<section class="section"><button class="btn btn-primary" id="send-summary">📤 傳總表到群組</button></section>' : ''}
       <section class="section card">
         <div class="stat-label">${esc(L.manager)}手上的現金（帳上應有）</div>
         <div class="big-number">${money(d.fundBalance)} 元</div>
         ${st ? `<p class="hint">上次盤點（${esc(shortDate(st.date))}）：數到 ${money(st.counted)} 元，帳上應有 ${money(st.expected)} 元，${diffText(st.diff)}</p>` : ''}
         <div class="btn-row admin-actions">
-          <button class="btn" data-admin="expense">🛒 記支出</button>
           <button class="btn" data-admin="withdraw">🏧 從${esc(L.elder)}帳戶領錢</button>
           <button class="btn" data-admin="stocktake">🧮 盤點</button>
         </div>
@@ -797,6 +815,96 @@
     }
   }
 
+  // ----- 總表（適合截圖：一頁看完、字大） -----
+  async function renderSummary() {
+    const app = $('#app');
+    app.innerHTML = '<div class="loading-page"><div class="spinner"></div><p>載入中…</p><p class="hint slow-hint" hidden>網路比較慢，請再等一下…</p></div>';
+    let d;
+    try {
+      d = await api('summary');
+    } catch (e) {
+      if (state.tab === 'summary') showPageError(e.message, 'summary');
+      return;
+    }
+    if (state.tab !== 'summary') return;
+    state.summary = d;
+    const monthNum = Number(d.month.slice(5));
+    const max = Math.max(1, ...d.monthCategories.map((c) => c.amount));
+    app.innerHTML = `
+      <div class="summary">
+        <h2 class="summary-title">${esc(d.labels.elder)}基金總表 <span class="summary-date">${esc(shortDate(d.date))} 更新</span></h2>
+
+        <section class="summary-block">
+          <div class="summary-label">💰 ${esc(d.labels.manager)}手上現金</div>
+          <div class="summary-big">${money(d.fundBalance)} 元</div>
+        </section>
+
+        <section class="summary-block">
+          <div class="summary-label">🧾 ${esc(d.labels.manager)}還沒付的代墊款　<b>${money(d.pendingTotal)} 元</b></div>
+          ${d.pending.length ? '' : '<p>（沒有）</p>'}
+          ${d.pending.map((g) => `
+            <div class="summary-person">
+              <div class="summary-person-head"><span>${esc(g.name)}</span><span>${money(g.total)} 元</span></div>
+              ${g.items.map((it) => `<div class="summary-item">${esc(shortDate(it.date))} ${esc(showCat(it.category))} ${money(it.amount)}${it.note ? '（' + esc(it.note) + '）' : ''}</div>`).join('')}
+            </div>`).join('')}
+        </section>
+
+        <section class="summary-block">
+          <div class="summary-label">✅ 已結清</div>
+          <div class="summary-settled">${d.settled.length ? d.settled.map(esc).join('、') : '（沒有）'}</div>
+        </section>
+
+        <section class="summary-block">
+          <div class="summary-label">📊 ${monthNum} 月各分類支出　<b>共 ${money(d.monthTotal)} 元</b></div>
+          ${d.monthCategories.map((c) => `
+            <div class="bar-row">
+              <span>${esc(showCat(c.category))}</span>
+              <div class="bar-track"><div class="bar-fill" style="width:${(c.amount / max * 100).toFixed(1)}%"></div></div>
+              <span class="bar-value">${money(c.amount)}</span>
+            </div>`).join('') || '<p>（沒有）</p>'}
+        </section>
+      </div>
+    `;
+  }
+
+  // ----- 傳總表到群組（liff.sendMessages：以大嫂本人身分送出，不計費） -----
+  async function confirmSendSummary() {
+    let d;
+    try {
+      d = await api('summary');
+    } catch (e) {
+      return showMessage('讀取失敗', e.message);
+    }
+    showModal(`
+      <p class="modal-title">要傳這份總表到群組嗎？</p>
+      <pre class="summary-preview">${esc(d.text)}</pre>
+      <div id="modal-error"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" data-modal="send">📤 傳到群組</button>
+        <button class="btn" data-modal="close">先不要</button>
+      </div>
+    `, { send: () => sendSummary(d.text) });
+  }
+
+  async function sendSummary(text) {
+    const inChat = !DEV && window.liff && liff.isInClient && liff.isInClient() &&
+      ['group', 'room', 'utou'].includes((liff.getContext() || {}).type);
+    if (!inChat) {
+      const box = $('#modal-error');
+      if (box) box.innerHTML = '<div class="error-box">要從家族群組裡的連結打開 App，才能直接傳到群組。</div>';
+      return;
+    }
+    setModalBusy(true, '傳送中…');
+    try {
+      await liff.sendMessages([{ type: 'text', text }]);
+      showMessage('✅ 已傳到群組', '家人在群組裡就看得到了。');
+    } catch (e) {
+      setModalBusy(false);
+      const box = $('#modal-error');
+      if (box) box.innerHTML = '<div class="error-box">傳送失敗，請再按一次</div>';
+    }
+  }
+
   // ===== 5. 彈出視窗 =====
   let modalHandlers = {};
 
@@ -839,6 +947,8 @@
     dlog('app 收到點擊 → ' + (t.dataset.tab ? 'tab=' + t.dataset.tab : t.dataset.cat || t.dataset.key || t.dataset.modal || t.id));
     if (t.dataset.tab) return showTab(t.dataset.tab);
     if (t.dataset.cat) return selectCategory(t.dataset.cat);
+    if (t.dataset.payer) return selectPayer(t.dataset.payer);
+    if (t.id === 'send-summary') return confirmSendSummary();
     if (t.dataset.key) return pressKey(t.dataset.key);
     if (t.id === 'submit') return confirmAdd();
     if (t.dataset.del) return confirmDelete(t.dataset.del);
@@ -906,7 +1016,7 @@
       $('#app').innerHTML = LOADING_FIRST;
       await loadMe(true);
       if (state.me && state.me.approved) {
-        showTab('add');
+        showTab(homeTab());
         markReady('first');
         const p = loadJSON(PERF_KEY); // 補上這次的「畫面可用」時間
         if (p) saveJSON(PERF_KEY, Object.assign(p, { ready: openInfo.ready, mode: openInfo.mode }));
@@ -948,7 +1058,10 @@
       if (!state.me.approved) return showPending();
       setApprovedCache(state.uid, true);
       renderTestBanner();
-      if (!blocking) renderTabs();
+      if (!blocking) {
+        if (!isAdmin() && state.tab === 'add') showTab('summary');
+        else renderTabs();
+      }
     } catch (e) {
       dlog('me 失敗 ' + e.code + ' ' + e.message);
       if (e.code === 'PENDING') return; // showPending 已處理
@@ -1015,7 +1128,7 @@
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span>檢查中…';
     await loadMe(true);
-    if (state.me && state.me.approved) showTab('add');
+    if (state.me && state.me.approved) showTab(homeTab());
     else if (state.tab === 'pending') showMessage('還沒確認', '管理員還沒確認，請晚一點再試。');
   }
 

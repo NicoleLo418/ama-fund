@@ -211,3 +211,31 @@ details > summary { cursor: pointer; padding: 8px 0; font-weight: 700; min-heigh
 .pay-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .pay-name { font-size: 24px; font-weight: 800; }
 .admin-actions { margin-top: 14px; }
+
+/* ===== 記一筆：誰出的錢 ===== */
+.payer-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 100%; min-height: 72px; border: 2px solid var(--line); border-radius: var(--radius);
+  background: var(--card); font-size: 26px; font-weight: 800; line-height: 1.2;
+}
+.payer-sub { font-size: 17px; font-weight: 600; color: var(--muted); margin-top: 2px; }
+.payer-self { min-height: 84px; font-size: 30px; margin-bottom: 10px; }
+.payer-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.payer-btn[aria-pressed="true"] { border: 3px solid var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.payer-btn[aria-pressed="true"]::before { content: "✔"; font-size: 20px; }
+
+/* ===== 總表（截圖用） ===== */
+.summary { padding-bottom: 8px; }
+.summary-title { font-size: 28px; margin: 8px 0 12px; }
+.summary-date { font-size: 18px; font-weight: 600; color: var(--muted); }
+.summary-block { background: var(--card); border: 2px solid var(--line); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+.summary-label { font-size: 20px; font-weight: 700; }
+.summary-big { font-size: 42px; font-weight: 800; color: var(--accent); line-height: 1.2; }
+.summary-person { margin-top: 10px; }
+.summary-person-head { display: flex; justify-content: space-between; font-size: 22px; font-weight: 800; }
+.summary-item { font-size: 18px; color: var(--muted); padding-left: 12px; overflow-wrap: anywhere; }
+.summary-settled { font-size: 22px; font-weight: 700; }
+.summary-preview {
+  text-align: left; white-space: pre-wrap; font-family: inherit; font-size: 16px; line-height: 1.5;
+  background: #f4f2ea; border-radius: 10px; padding: 10px; max-height: 45vh; overflow: auto; margin: 0 0 14px;
+}
