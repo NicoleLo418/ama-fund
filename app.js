@@ -37,7 +37,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26g';
+  const APP_VERSION = '2026-09-26h';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -854,7 +854,7 @@
 
         <section class="summary-block">
           <div class="summary-label">✅ 已結清</div>
-          <div class="summary-settled">${d.settled.length ? d.settled.map(esc).join('、') : '（沒有）'}</div>
+          ${d.settled.length ? d.settled.map((p) => `<div class="summary-settled">${esc(p.name)}${p.date ? ' <span class="summary-settled-date">' + esc(shortDate(p.date)) + ' 已結清</span>' : ''}</div>`).join('') : '<div class="summary-settled">（沒有）</div>'}
         </section>
 
         <section class="summary-block">
