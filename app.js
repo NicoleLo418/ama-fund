@@ -37,9 +37,9 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26f';
+  const APP_VERSION = '2026-09-26g';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
-  const SEND_SUMMARY_ENABLED = false;
+  const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
@@ -285,12 +285,15 @@
       ${heading ? `<h2 class="form-heading">${esc(heading)}</h2>` : ''}
       ${whoPicker}
       ${m.category ? `<section class="section">
-        ${step(f.mode === 'expense' ? '買了什麼？' : '買了什麼？')}
+        ${step('買了什麼？')}
         <div class="cat-grid">
           ${categories().map((c) =>
             `<button class="cat-btn" data-cat="${esc(c)}" aria-pressed="${c === f.category}">${esc(c)}</button>`
           ).join('')}
         </div>
+        <label class="note-label" for="note">細項 <span class="hint">（可不填）</span></label>
+        <input class="text-input" id="note" type="text" maxlength="100"
+               placeholder="例：雞肉100、葡萄250" value="${esc(f.note)}" enterkeyhint="done">
       </section>` : ''}
 
       <section class="section">
@@ -305,7 +308,7 @@
         </div>
       </section>
 
-      ${m.note ? `<section class="section">
+      ${m.note && !m.category ? `<section class="section">
         ${step('說明 <span class="hint">（可不填）</span>')}
         <input class="text-input" id="note" type="text" maxlength="100"
                placeholder="${f.mode === 'withdraw' ? '例：從' + esc(L.elder) + '帳戶領出' : '例：雞肉、葡萄'}" value="${esc(f.note)}" enterkeyhint="done">
