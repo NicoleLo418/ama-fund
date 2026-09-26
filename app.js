@@ -37,7 +37,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26h';
+  const APP_VERSION = '2026-09-26i';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -858,7 +858,7 @@
         </section>
 
         <section class="summary-block">
-          <div class="summary-label">📊 本期各分類支出${d.period ? '（' + esc(shortDate(d.period.date)) + ' 起）' : ''}　<b>共 ${money(d.monthTotal)} 元</b></div>
+          <div class="summary-label">📊 本期各分類支出${d.period ? '（' + esc(shortDate(d.period.date)) + '～' + esc(shortDate(d.date)) + '）' : ''}　<b>共 ${money(d.monthTotal)} 元</b></div>
           ${d.monthCategories.map((c) => `
             <div class="bar-row">
               <span>${esc(showCat(c.category))}</span>
