@@ -34,7 +34,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26b';
+  const APP_VERSION = '2026-09-26c';
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
@@ -199,21 +199,34 @@
     requestId: null, // 同一筆送出重試時沿用，避免重複記帳
   };
 
-  function newForm() {
-    return { category: '', amount: '', note: '', date: today() };
+  // 表單模式：claim＝代墊（記一筆）、expense＝管理人支出、withdraw＝從長輩帳戶領錢、stocktake＝盤點
+  const MODES = {
+    claim: { type: '代墊', category: true, note: true },
+    expense: { type: '支出', category: true, note: true },
+    withdraw: { type: '領出', category: false, note: true },
+    stocktake: { type: '盤點', category: false, note: false },
+  };
+
+  function newForm(mode) {
+    return { mode: mode || 'claim', category: '', amount: '', note: '', date: today(), target: '' };
   }
 
+  const isAdmin = () => !!(state.me && state.me.role === 'admin');
+
   const TABS = [
-    { id: 'add', icon: '✏️', label: '記一筆', render: renderAdd },
-    { id: 'overview', icon: '📊', label: '總覽', render: renderOverview },
+    { id: 'add', icon: '✏️', label: () => '記一筆', render: () => renderAdd() },
+    { id: 'claims', icon: '🧾', label: () => '我的請款', render: () => renderClaims() },
+    { id: 'overview', icon: '📊', label: () => '總覽', render: () => renderOverview() },
+    { id: 'admin', icon: '🔑', label: () => L.manager + '專用', render: () => renderAdmin(), admin: true },
   ];
+  const visibleTabs = () => TABS.filter((t) => !t.admin || isAdmin());
 
   function renderTabs() {
     const nav = $('#tabs');
     nav.hidden = false;
-    nav.innerHTML = TABS.map((t) =>
+    nav.innerHTML = visibleTabs().map((t) =>
       `<button class="tab" data-tab="${t.id}" ${t.id === state.tab ? 'aria-current="page"' : ''}>
-         <span class="icon" aria-hidden="true">${t.icon}</span>${esc(t.label)}
+         <span class="icon" aria-hidden="true">${t.icon}</span>${esc(t.label())}
        </button>`
     ).join('');
   }
@@ -222,8 +235,10 @@
     dlog('showTab(' + id + ')');
     state.tab = id;
     renderTabs();
-    const tab = TABS.find((t) => t.id === id) || TABS[0];
-    $('#page-title').textContent = tab.label;
+    if (id === 'admin') state.adminView = 'home';
+    const tab = visibleTabs().find((t) => t.id === id) || TABS[0];
+    $('#page-title').textContent = tab.label();
+    renderTestBanner();
     window.scrollTo(0, 0);
     Promise.resolve().then(tab.render).catch((e) => {
       dlog('畫面 ' + id + ' 出錯：' + e.message);
@@ -234,20 +249,43 @@
 
   // ----- 記一筆 -----
   function renderAdd() {
-    if (!state.form) state.form = newForm();
+    if (!state.form || state.form.mode !== 'claim') state.form = newForm('claim');
+    renderForm();
+  }
+
+  /** 通用表單：記一筆（代墊）／記支出／領錢／盤點 */
+  function renderForm() {
     const f = state.form;
-    $('#app').innerHTML = `
+    const m = MODES[f.mode];
+    let n = 0;
+    const step = (title) => `<h2 class="section-title">${++n}. ${title}</h2>`;
+    const back = state.tab === 'admin'
+      ? `<button class="btn back-btn" data-admin="home">← 回${esc(L.manager)}專用</button>` : '';
+    const heading = { expense: L.manager + '記支出', withdraw: '從' + L.elder + '帳戶領錢', stocktake: '盤點手上的現金' }[f.mode];
+    const whoPicker = f.mode === 'claim' && isAdmin() ? `
       <section class="section">
-        <h2 class="section-title">1. 買了什麼？</h2>
+        <h2 class="section-title">幫誰記？</h2>
+        <select class="text-input" id="target">
+          <option value="">自己（${esc(state.me.name)}）</option>
+          ${(state.members || []).filter((x) => x.userId !== state.me.userId).map((x) =>
+            `<option value="${esc(x.userId)}" ${x.userId === f.target ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}
+        </select>
+      </section>` : '';
+    $('#app').innerHTML = `
+      ${back}
+      ${heading ? `<h2 class="form-heading">${esc(heading)}</h2>` : ''}
+      ${whoPicker}
+      ${m.category ? `<section class="section">
+        ${step(f.mode === 'expense' ? '買了什麼？' : '買了什麼？')}
         <div class="cat-grid">
           ${CATEGORIES.map((c) =>
             `<button class="cat-btn" data-cat="${esc(c)}" aria-pressed="${c === f.category}">${esc(c)}</button>`
           ).join('')}
         </div>
-      </section>
+      </section>` : ''}
 
       <section class="section">
-        <h2 class="section-title">2. 多少錢？</h2>
+        ${step(f.mode === 'stocktake' ? '手上實際有多少現金？' : f.mode === 'withdraw' ? '領了多少錢？' : '多少錢？')}
         <div class="amount-display" id="amount-display"></div>
         <div class="keypad">
           ${['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((k) =>
@@ -258,14 +296,14 @@
         </div>
       </section>
 
-      <section class="section">
-        <h2 class="section-title">3. 說明 <span class="hint">（可不填）</span></h2>
+      ${m.note ? `<section class="section">
+        ${step('說明 <span class="hint">（可不填）</span>')}
         <input class="text-input" id="note" type="text" maxlength="100"
-               placeholder="例：雞肉、葡萄" value="${esc(f.note)}" enterkeyhint="done">
-      </section>
+               placeholder="${f.mode === 'withdraw' ? '例：從' + esc(L.elder) + '帳戶領出' : '例：雞肉、葡萄'}" value="${esc(f.note)}" enterkeyhint="done">
+      </section>` : ''}
 
       <section class="section">
-        <h2 class="section-title">4. 哪一天？</h2>
+        ${step('哪一天？')}
         <div class="date-row">
           <span class="date-text" id="date-text">${esc(friendlyDate(f.date))}</span>
           <input class="text-input" id="date" type="date" value="${esc(f.date)}" max="${today()}"
@@ -279,8 +317,12 @@
     `;
     updateAmount();
 
-    $('#note').addEventListener('input', (e) => { f.note = e.target.value; });
-    $('#note').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+    if ($('#note')) {
+      $('#note').addEventListener('input', (e) => { f.note = e.target.value; });
+      $('#note').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+    }
+    if ($('#target')) $('#target').addEventListener('change', (e) => { f.target = e.target.value; });
+    if (f.mode === 'claim' && isAdmin() && !state.members) loadMembers();
     $('#date').addEventListener('change', (e) => {
       f.date = e.target.value || today();
       $('#date-text').textContent = friendlyDate(f.date);
@@ -299,7 +341,8 @@
     const f = state.form;
     if (k === 'clear') f.amount = '';
     else if (k === 'back') f.amount = f.amount.slice(0, -1);
-    else if (f.amount.length < MAX_DIGITS && !(f.amount === '' && k === '0')) f.amount += k;
+    else if (f.amount === '0') f.amount = k === '0' ? '0' : k;
+    else if (f.amount.length < MAX_DIGITS && !(f.amount === '' && k === '0' && f.mode !== 'stocktake')) f.amount += k;
     updateAmount();
   }
 
@@ -310,17 +353,28 @@
     });
   }
 
+  async function loadMembers() {
+    try {
+      state.members = (await api('members')).members;
+      if (state.form && state.form.mode === 'claim' && $('#target') === null && state.tab === 'add') renderForm();
+    } catch (e) { /* 選人清單拿不到就只能記自己 */ }
+  }
+
   function confirmAdd() {
     const f = state.form;
-    if (!f.category) return showMessage('還沒選分類', '請先按上面「買了什麼？」的其中一個按鈕。');
+    const m = MODES[f.mode];
+    if (m.category && !f.category) return showMessage('還沒選分類', '請先按上面「買了什麼？」的其中一個按鈕。');
     if (!f.amount) return showMessage('還沒輸入金額', '請用數字按鈕輸入金額。');
     if (!state.requestId) state.requestId = newRequestId();
 
+    const targetName = f.target ? ((state.members || []).find((x) => x.userId === f.target) || {}).name : '';
+    const what = { claim: (targetName ? targetName + ' 代墊・' : '') + f.category, expense: L.manager + '支出・' + f.category,
+      withdraw: '從' + L.elder + '帳戶領出', stocktake: '手上現金' }[f.mode];
     const noteLine = f.note.trim() ? `<br>（${esc(f.note.trim())}）` : '';
     showModal(`
       <p class="modal-title">對嗎？</p>
       <p class="modal-body">
-        ${esc(friendlyDate(f.date))}・${esc(f.category)}
+        ${esc(friendlyDate(f.date))}・${esc(what)}
         <span class="modal-big">${money(f.amount)} 元</span>
         ${noteLine}
       </p>
@@ -339,25 +393,35 @@
     try {
       const result = await api('addEntry', {
         requestId: state.requestId,
-        type: '代墊',
-        category: f.category,
+        type: MODES[f.mode].type,
+        category: MODES[f.mode].category ? f.category : '',
         amount: Number(f.amount),
         note: f.note.trim(),
         date: f.date,
+        targetUserId: f.mode === 'claim' && f.target ? f.target : undefined,
       });
       state.requestId = null;
-      state.form = newForm();
-      if (state.me) state.me.pendingTotal = result.pendingTotal;
+      const mode = f.mode;
+      state.form = newForm(mode);
+      const e = result.entry;
+      let body;
+      if (mode === 'claim') {
+        if (state.me && e.targetUserId === state.me.userId) state.me.pendingTotal = result.pendingTotal;
+        body = `${esc(e.category)} ${money(e.amount)} 元<br><br>${esc(e.targetName)}目前還沒拿到：
+          <span class="modal-big">${money(result.pendingTotal)} 元</span>`;
+      } else if (mode === 'stocktake') {
+        const st = result.stocktake;
+        body = `數到 ${money(st.counted)} 元<br>帳上應有 ${money(st.expected)} 元<br><br>${diffText(st.diff)}`;
+      } else {
+        body = `${mode === 'expense' ? esc(e.category) + ' ' : ''}${money(e.amount)} 元<br><br>${esc(L.manager)}手上的現金（帳上）：
+          <span class="modal-big">${money(result.fundBalance)} 元</span>`;
+      }
       showModal(`
         <p class="modal-title">✅ 記好了！</p>
-        <p class="modal-body">
-          ${esc(result.entry.category)} ${money(result.entry.amount)} 元<br><br>
-          ${esc(result.entry.targetName)}目前還沒拿到：
-          <span class="modal-big">${money(result.pendingTotal)} 元</span>
-        </p>
+        <p class="modal-body">${body}</p>
         <button class="btn btn-primary" data-modal="close">好</button>
       `);
-      renderAdd();
+      if (state.tab === 'admin') { state.adminView = 'home'; renderAdmin(); } else renderForm();
     } catch (e) {
       setModalBusy(false);
       const box = $('#modal-error'); // 待核准時彈出視窗已被關掉
@@ -374,7 +438,12 @@
     盤點: () => '盤點現金',
   };
 
-  function entryItem(e) {
+  function diffText(diff) {
+    if (diff === 0) return '<b>剛好，沒有差</b>';
+    return diff > 0 ? `<span class="diff-plus">多了 ${money(diff)} 元</span>` : `<span class="diff-minus">少了 ${money(-diff)} 元</span>`;
+  }
+
+  function entryItem(e, opts) {
     const title = (TYPE_LABEL[e.type] || (() => e.type))(e);
     const tag = e.type !== '代墊' ? ''
       : e.status === '已付' ? '<span class="tag tag-paid">已付</span>'
@@ -385,7 +454,10 @@
         <div class="entry-title">${esc(title)}${tag}</div>
         <div class="entry-sub">${sub}</div>
       </div>
-      <div class="amount">${money(e.amount)} 元</div>
+      <div class="entry-side">
+        <div class="amount">${money(e.amount)} 元</div>
+        ${opts && opts.deletable ? `<button class="small-btn danger" data-del="${esc(e.id)}">刪除</button>` : ''}
+      </div>
     </li>`;
   }
 
@@ -478,9 +550,7 @@
     const stocktake = !st ? '' : `
       <p class="hint">上次盤點（${esc(shortDate(st.date))}）：數到 ${money(st.counted)} 元，
         帳上應有 ${money(st.expected)} 元，
-        ${st.diff === 0 ? '<b>剛好</b>'
-          : st.diff > 0 ? `<span class="diff-plus">多 ${money(st.diff)} 元</span>`
-          : `<span class="diff-minus">少 ${money(-st.diff)} 元</span>`}
+        ${diffText(st.diff)}
       </p>`;
 
     const max = Math.max(1, ...d.monthCategories.map((c) => c.amount));
@@ -521,10 +591,207 @@
       <section class="section card">
         <div class="stat-label">最近 20 筆</div>
         <ul class="list">
-          ${d.recent.map(entryItem).join('') || '<li>還沒有紀錄</li>'}
+          ${d.recent.map((e) => entryItem(e, { deletable: isAdmin() })).join('') || '<li>還沒有紀錄</li>'}
         </ul>
       </section>
     `;
+  }
+
+  // ----- 測試模式提示 -----
+  function renderTestBanner() {
+    let el = $('#test-banner');
+    const on = !!(state.me && state.me.tester);
+    if (!on) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'test-banner';
+      el.className = 'test-banner';
+      document.body.insertBefore(el, document.body.firstChild);
+    }
+    el.textContent = '🧪 測試中：你新增、修改、刪除的紀錄都會標記為「測試」，之後可以一次還原';
+  }
+
+  // ----- 我的請款 -----
+  async function renderClaims() {
+    const app = $('#app');
+    app.innerHTML = '<div class="loading-page"><div class="spinner"></div><p>載入中…</p></div>';
+    let d;
+    try {
+      d = await api('myClaims');
+    } catch (e) {
+      if (state.tab === 'claims') showPageError(e.message, 'claims');
+      return;
+    }
+    if (state.tab !== 'claims') return;
+    app.innerHTML = `
+      <section class="section card">
+        <div class="stat-label">還沒拿到</div>
+        <div class="big-number">${money(d.pendingTotal)} 元</div>
+        ${d.pending.length ? '' : '<p>目前沒有待付的紀錄 👍</p>'}
+        <ul class="list">
+          ${d.pending.map((e) => entryItem(e, { deletable: true })).join('')}
+        </ul>
+      </section>
+      <details class="section card">
+        <summary class="stat-label">已經拿到的（最近 ${d.paid.length} 筆）</summary>
+        <ul class="list">
+          ${d.paid.map((e) => entryItem(e)).join('') || '<li>還沒有</li>'}
+        </ul>
+      </details>
+    `;
+  }
+
+  function showPageError(message, tab) {
+    $('#app').innerHTML = `<div class="error-box">${esc(message)}</div>
+      <button class="btn btn-primary" data-tab="${tab}">再試一次</button>`;
+  }
+
+  // ----- 管理人專用 -----
+  function adminGo(view) {
+    if (view === 'home') { state.adminView = 'home'; return renderAdmin(); }
+    state.adminView = view; // expense / withdraw / stocktake
+    state.form = newForm(view);
+    state.requestId = null;
+    window.scrollTo(0, 0);
+    renderForm();
+  }
+
+  async function renderAdmin() {
+    if (state.adminView && state.adminView !== 'home') return renderForm();
+    const app = $('#app');
+    app.innerHTML = '<div class="loading-page"><div class="spinner"></div><p>載入中…</p></div>';
+    let d, ov;
+    try {
+      [d, ov] = await Promise.all([api('pendingByPerson'), api('overview')]);
+    } catch (e) {
+      if (state.tab === 'admin') showPageError(e.message, 'admin');
+      return;
+    }
+    if (state.tab !== 'admin' || state.adminView !== 'home') return;
+    state.pendingPeople = d.people;
+    const st = d.lastStocktake;
+    app.innerHTML = `
+      <section class="section card">
+        <div class="stat-label">${esc(L.manager)}手上的現金（帳上應有）</div>
+        <div class="big-number">${money(d.fundBalance)} 元</div>
+        ${st ? `<p class="hint">上次盤點（${esc(shortDate(st.date))}）：數到 ${money(st.counted)} 元，帳上應有 ${money(st.expected)} 元，${diffText(st.diff)}</p>` : ''}
+        <div class="btn-row admin-actions">
+          <button class="btn" data-admin="expense">🛒 記支出</button>
+          <button class="btn" data-admin="withdraw">🏧 從${esc(L.elder)}帳戶領錢</button>
+          <button class="btn" data-admin="stocktake">🧮 盤點</button>
+        </div>
+      </section>
+
+      <section class="section card">
+        <div class="stat-label">待付清單</div>
+        ${d.people.length ? '' : '<p>目前沒有人需要付 👍</p>'}
+        ${d.people.map((g) => `
+          <div class="pay-group">
+            <div class="pay-head">
+              <span class="pay-name">${esc(g.name)}</span>
+              <span class="amount">${money(g.total)} 元</span>
+            </div>
+            <button class="btn btn-primary" data-payall="${esc(g.userId)}">全部付清 ${money(g.total)} 元</button>
+            <details>
+              <summary>看明細（${g.entries.length} 筆）</summary>
+              <ul class="list">
+                ${g.entries.map((e) => `<li>
+                  <div class="entry-main">
+                    <div class="entry-title">${esc(e.category)} ${money(e.amount)} 元</div>
+                    <div class="entry-sub">${[shortDate(e.date), e.note].filter(Boolean).map(esc).join('・')}</div>
+                  </div>
+                  <button class="small-btn" data-payone="${esc(g.userId)}|${esc(e.id)}">已付</button>
+                </li>`).join('')}
+              </ul>
+            </details>
+          </div>`).join('')}
+      </section>
+
+      <section class="section card">
+        <div class="stat-label">最近 20 筆（可刪除）</div>
+        <ul class="list">
+          ${ov.recent.map((e) => entryItem(e, { deletable: true })).join('') || '<li>還沒有紀錄</li>'}
+        </ul>
+      </section>
+    `;
+  }
+
+  function confirmPay(userId, entryId) {
+    const g = (state.pendingPeople || []).find((x) => x.userId === userId);
+    if (!g) return;
+    const e = entryId ? g.entries.find((x) => x.id === entryId) : null;
+    const amount = e ? e.amount : g.total;
+    state.requestId = newRequestId();
+    showModal(`
+      <p class="modal-title">確定付錢？</p>
+      <p class="modal-body">
+        付給 ${esc(g.name)}
+        <span class="modal-big">${money(amount)} 元</span>
+        ${e ? `（${esc(e.category)}${e.note ? '：' + esc(e.note) : ''}）` : `（全部 ${g.entries.length} 筆）`}
+      </p>
+      <p class="hint slow-hint" hidden>網路比較慢，請再等一下，不要關掉…</p>
+      <div id="modal-error"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" data-modal="send">確定，已付</button>
+        <button class="btn" data-modal="close">取消</button>
+      </div>
+    `, { send: () => sendPay(userId, entryId) });
+  }
+
+  async function sendPay(userId, entryId) {
+    setModalBusy(true, '處理中…');
+    try {
+      const r = await api('pay', { requestId: state.requestId, targetUserId: userId, entryIds: entryId ? [entryId] : undefined });
+      state.requestId = null;
+      showModal(`
+        <p class="modal-title">✅ 已付 ${esc(r.targetName)} ${money(r.amount)} 元</p>
+        <p class="modal-body">${r.settled ? esc(r.targetName) + '已結清' : esc(r.targetName) + '還有 ' + money(r.remaining) + ' 元沒拿到'}<br><br>
+          ${esc(L.manager)}手上的現金（帳上）：<span class="modal-big">${money(r.fundBalance)} 元</span></p>
+        <button class="btn btn-primary" data-modal="close">好</button>
+      `);
+      if (state.tab === 'admin') renderAdmin();
+    } catch (e) {
+      setModalBusy(false);
+      const box = $('#modal-error');
+      if (box) box.innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+    }
+  }
+
+  function confirmDelete(id) {
+    const li = document.querySelector(`[data-del="${CSS.escape(id)}"]`);
+    const title = li ? li.closest('li').querySelector('.entry-title').textContent : '';
+    const amount = li ? li.closest('li').querySelector('.amount').textContent : '';
+    state.requestId = newRequestId();
+    showModal(`
+      <p class="modal-title">要刪除這筆嗎？</p>
+      <p class="modal-body">${esc(title)}<span class="modal-big">${esc(amount)}</span>
+        刪除後不會出現在帳上（試算表仍會保留紀錄）</p>
+      <p class="hint slow-hint" hidden>網路比較慢，請再等一下，不要關掉…</p>
+      <div id="modal-error"></div>
+      <div class="btn-row">
+        <button class="btn btn-danger btn-primary" data-modal="send">確定刪除</button>
+        <button class="btn" data-modal="close">不要刪</button>
+      </div>
+    `, { send: () => sendDelete(id) });
+  }
+
+  async function sendDelete(id) {
+    setModalBusy(true, '刪除中…');
+    try {
+      const r = await api('deleteEntry', { requestId: state.requestId, id });
+      state.requestId = null;
+      showModal(`
+        <p class="modal-title">✅ 已刪除</p>
+        ${r.reverted ? `<p class="modal-body">相關的 ${r.reverted} 筆代墊已改回「待付」</p>` : ''}
+        <button class="btn btn-primary" data-modal="close">好</button>
+      `);
+      const tab = TABS.find((t) => t.id === state.tab);
+      if (tab) tab.render();
+    } catch (e) {
+      setModalBusy(false);
+      const box = $('#modal-error');
+      if (box) box.innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+    }
   }
 
   // ===== 5. 彈出視窗 =====
@@ -571,6 +838,10 @@
     if (t.dataset.cat) return selectCategory(t.dataset.cat);
     if (t.dataset.key) return pressKey(t.dataset.key);
     if (t.id === 'submit') return confirmAdd();
+    if (t.dataset.del) return confirmDelete(t.dataset.del);
+    if (t.dataset.payall) return confirmPay(t.dataset.payall, null);
+    if (t.dataset.payone) return confirmPay(t.dataset.payone.split('|')[0], t.dataset.payone.split('|')[1]);
+    if (t.dataset.admin) return adminGo(t.dataset.admin);
     if (t.dataset.modal === 'close') return hideModal();
     if (t.dataset.modal && modalHandlers[t.dataset.modal]) return modalHandlers[t.dataset.modal]();
   });
@@ -673,6 +944,7 @@
       $('#who').textContent = '你好，' + state.me.name;
       if (!state.me.approved) return showPending();
       setApprovedCache(state.uid, true);
+      renderTestBanner();
       if (!blocking) renderTabs();
     } catch (e) {
       dlog('me 失敗 ' + e.code + ' ' + e.message);
