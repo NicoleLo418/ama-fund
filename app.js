@@ -13,7 +13,10 @@
 
   // ===== 1. 設定與小工具 =====
   const CFG = window.APP_CONFIG || {};
-  const CATEGORIES = ['菜肉', '水果', '日用品', '醫療', '車資', '給零用錢', '其他'];
+  // 分類清單；「給○○現金」會依長輩稱呼顯示（見 categories()）
+  const BASE_CATEGORIES = ['菜肉', '水果', '日用品', '醫療', '車資', '給長輩現金', '其他'];
+  const categories = () => BASE_CATEGORIES.map((c) => (c === '給長輩現金' ? '給' + L.elder + '現金' : c));
+  const showCat = (c) => (c === '給零用錢' || /^給.+現金$/.test(c || '') ? '給' + L.elder + '現金' : c);
 
   // 畫面上的稱呼：從試算表「設定」表的「管理人稱呼」「長輩稱呼」讀取（後端透過 me 回傳），
   // 並存在手機裡，下次打開不用等後端就能顯示正確的稱呼
@@ -34,7 +37,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26c';
+  const APP_VERSION = '2026-09-26d';
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
 
   function esc(s) {
@@ -278,7 +281,7 @@
       ${m.category ? `<section class="section">
         ${step(f.mode === 'expense' ? '買了什麼？' : '買了什麼？')}
         <div class="cat-grid">
-          ${CATEGORIES.map((c) =>
+          ${categories().map((c) =>
             `<button class="cat-btn" data-cat="${esc(c)}" aria-pressed="${c === f.category}">${esc(c)}</button>`
           ).join('')}
         </div>
@@ -448,7 +451,7 @@
     const tag = e.type !== '代墊' ? ''
       : e.status === '已付' ? '<span class="tag tag-paid">已付</span>'
       : '<span class="tag tag-pending">待付</span>';
-    const sub = [shortDate(e.date), e.category, e.note].filter(Boolean).map(esc).join('・');
+    const sub = [shortDate(e.date), showCat(e.category), e.note].filter(Boolean).map(esc).join('・');
     return `<li>
       <div class="entry-main">
         <div class="entry-title">${esc(title)}${tag}</div>
@@ -561,7 +564,7 @@
         ? '<p class="updating"><span class="spinner"></span>正在更新最新資料…<span class="slow-hint" hidden>（網路比較慢，請再等一下）</span></p>'
         : ''}</div>
       <section class="section card">
-        <div class="stat-label">大家還沒拿到的錢</div>
+        <div class="stat-label">${esc(L.manager)}還沒付的代墊款</div>
         <div class="big-number">${money(d.pendingTotal)} 元</div>
         <ul class="list">
           ${d.members.map((m) => `<li>
@@ -697,7 +700,7 @@
               <ul class="list">
                 ${g.entries.map((e) => `<li>
                   <div class="entry-main">
-                    <div class="entry-title">${esc(e.category)} ${money(e.amount)} 元</div>
+                    <div class="entry-title">${esc(showCat(e.category))} ${money(e.amount)} 元</div>
                     <div class="entry-sub">${[shortDate(e.date), e.note].filter(Boolean).map(esc).join('・')}</div>
                   </div>
                   <button class="small-btn" data-payone="${esc(g.userId)}|${esc(e.id)}">已付</button>
