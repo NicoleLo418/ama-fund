@@ -37,7 +37,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26e';
+  const APP_VERSION = '2026-09-26f';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = false;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -828,11 +828,11 @@
     }
     if (state.tab !== 'summary') return;
     state.summary = d;
-    const monthNum = Number(d.month.slice(5));
     const max = Math.max(1, ...d.monthCategories.map((c) => c.amount));
     app.innerHTML = `
       <div class="summary">
         <h2 class="summary-title">${esc(d.labels.elder)}基金總表 <span class="summary-date">${esc(shortDate(d.date))} 更新</span></h2>
+        ${d.period ? `<p class="summary-period">${esc(shortDate(d.period.date))} 從${esc(d.labels.elder)}帳戶領出 ${money(d.period.amount)} 元</p>` : ''}
 
         <section class="summary-block">
           <div class="summary-label">💰 ${esc(d.labels.manager)}手上現金</div>
@@ -855,7 +855,7 @@
         </section>
 
         <section class="summary-block">
-          <div class="summary-label">📊 ${monthNum} 月各分類支出　<b>共 ${money(d.monthTotal)} 元</b></div>
+          <div class="summary-label">📊 本期各分類支出${d.period ? '（' + esc(shortDate(d.period.date)) + ' 起）' : ''}　<b>共 ${money(d.monthTotal)} 元</b></div>
           ${d.monthCategories.map((c) => `
             <div class="bar-row">
               <span>${esc(showCat(c.category))}</span>
