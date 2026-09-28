@@ -37,7 +37,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-26i';
+  const APP_VERSION = '2026-09-28a';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -981,7 +981,9 @@
     // 已核准過的人：連 LINE 登入都不等，「記一筆」馬上顯示；登入與身分確認在背景做。
     // （後端每次寫入/讀取都會再檢查核准狀態，安全性不變）
     const guessUid = DEV ? currentDevUser().userId : loadJSON(LAST_UID_KEY);
-    let fast = isApprovedCached(guessUid);
+    // 從 liff.line.me/…/stock.html 這類子路徑進來時，LINE 會先打開這頁再轉過去：這時不要先畫記一筆
+    const passingThrough = params.has('liff.state');
+    let fast = !passingThrough && isApprovedCached(guessUid);
     if (fast) {
       state.uid = guessUid;
       showTab('add');
