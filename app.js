@@ -37,7 +37,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-09-28a';
+  const APP_VERSION = '2026-10-03a';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -443,8 +443,11 @@
       showModal(`
         <p class="modal-title">✅ 記好了！</p>
         <p class="modal-body">${body}</p>
-        <button class="btn btn-primary" data-modal="close">好</button>
-      `);
+        <div class="btn-row">
+          <button class="btn btn-primary" data-modal="close">好，繼續記</button>
+          ${SEND_SUMMARY_ENABLED && isAdmin() ? '<button class="btn" data-modal="share">📤 記完了，傳到群組</button>' : ''}
+        </div>
+      `, { share: confirmSendSummary });
       if (state.tab === 'admin') { state.adminView = 'home'; renderAdmin(); } else renderForm();
     } catch (e) {
       setModalBusy(false);
@@ -886,10 +889,10 @@
         <button class="btn btn-primary" data-modal="send">📤 傳到群組</button>
         <button class="btn" data-modal="close">先不要</button>
       </div>
-    `, { send: () => sendSummary(d.text) });
+    `, { send: () => sendSummary(d.text, d.newIds) });
   }
 
-  async function sendSummary(text) {
+  async function sendSummary(text, newIds) {
     const inChat = !DEV && window.liff && liff.isInClient && liff.isInClient() &&
       ['group', 'room', 'utou'].includes((liff.getContext() || {}).type);
     if (!inChat) {
@@ -900,6 +903,10 @@
     setModalBusy(true, '傳送中…');
     try {
       await liff.sendMessages([{ type: 'text', text }]);
+      // 標記這次傳出去的明細，下次就只會列新的
+      if (newIds && newIds.length) {
+        try { await api('markSent', { ids: newIds, requestId: newRequestId() }); } catch (e) { dlog('markSent 失敗 ' + e.message); }
+      }
       showMessage('✅ 已傳到群組', '家人在群組裡就看得到了。');
     } catch (e) {
       setModalBusy(false);
