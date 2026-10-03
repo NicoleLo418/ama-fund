@@ -42,7 +42,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-10-03c';
+  const APP_VERSION = '2026-10-03d';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -96,6 +96,7 @@
   }
 
   function setupDevBar() {
+    if (params.has('shot')) return; // 截圖用：不顯示開發模式橫條
     const bar = $('#devbar');
     const sel = $('#dev-user');
     bar.hidden = false;
@@ -230,7 +231,11 @@
     { id: 'admin', icon: '🔑', label: () => '管理', render: () => renderAdmin(), admin: true },
   ];
   const visibleTabs = () => TABS.filter((t) => !t.admin || isAdmin());
-  const homeTab = () => (isAdmin() ? 'add' : 'summary');
+  const homeTab = () => {
+    const h = location.hash.slice(1); // 例如 …#summary 直接打開總表
+    if (h && visibleTabs().some((t) => t.id === h)) return h;
+    return isAdmin() ? 'add' : 'summary';
+  };
 
   function renderTabs() {
     const nav = $('#tabs');
@@ -1003,7 +1008,10 @@
     let fast = !passingThrough && isApprovedCached(guessUid);
     if (fast) {
       state.uid = guessUid;
-      showTab('add');
+      // 先用上次存的身分（角色、名字、代墊人），才知道要顯示「記一筆」還是「總表」
+      const savedMe = loadJSON(ME_KEY);
+      if (savedMe && savedMe.uid === guessUid) state.me = savedMe.me;
+      showTab(homeTab());
       markReady('cached');
     }
 
@@ -1047,6 +1055,7 @@
   }
 
   const LAST_UID_KEY = 'ama-fund.lastUid.v1';
+  const ME_KEY = 'ama-fund.me.v1'; // 上次的身分（角色等），讓已核准的人一打開就到對的分頁
   const LOADING_FIRST = `<div class="loading-page"><div class="spinner"></div>
     <p>正在確認你的身分，請稍等…</p>
     <p class="hint">第一次打開會比較久，之後就會很快。</p></div>`;
@@ -1085,6 +1094,7 @@
       $('#who').textContent = '你好，' + state.me.name;
       if (!state.me.approved) return showPending();
       setApprovedCache(state.uid, true);
+      saveJSON(ME_KEY, { uid: state.uid, me: { userId: state.me.userId, name: state.me.name, role: state.me.role, approved: true, payers: state.me.payers, categories: state.me.categories, labels: state.me.labels } });
       renderTestBanner();
       if (!blocking) {
         if (!isAdmin() && state.tab === 'add') showTab('summary');
@@ -1135,6 +1145,7 @@
   function showPending() {
     state.tab = 'pending';
     setApprovedCache(state.uid, false);
+    saveJSON(ME_KEY, null);
     saveJSON(OVERVIEW_KEY, null); // 不留帳務資料在手機上
     hideModal();
     $('#tabs').hidden = true;
