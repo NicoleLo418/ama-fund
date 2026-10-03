@@ -244,3 +244,4 @@ details > summary { cursor: pointer; padding: 8px 0; font-weight: 700; min-heigh
 
 .note-label { display: block; font-size: 20px; font-weight: 700; margin: 14px 0 6px; }
 .summary-settled-date { font-size: 18px; font-weight: 600; color: var(--muted); }
+.cat-btn.cat-wide { grid-column: 1 / -1; }

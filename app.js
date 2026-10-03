@@ -14,8 +14,13 @@
   // ===== 1. 設定與小工具 =====
   const CFG = window.APP_CONFIG || {};
   // 分類清單；「給○○現金」會依長輩稱呼顯示（見 categories()）
-  const BASE_CATEGORIES = ['菜肉', '水果', '日用品', '醫療', '車資', '給長輩現金', '其他'];
-  const categories = () => BASE_CATEGORIES.map((c) => (c === '給長輩現金' ? '給' + L.elder + '現金' : c));
+  // 分類由設定表「分類」決定（後端在 me 回傳），存在手機裡；第一次打開前先用預設
+  const CATS_KEY = 'ama-fund.categories.v1';
+  const BASE_CATEGORIES = ['吃的', '日用品', '看醫生', '家裡費用', '車資', '給長輩現金', '其他'];
+  let savedCats = null;
+  try { savedCats = JSON.parse(localStorage.getItem(CATS_KEY) || 'null'); } catch (e) { /* 忽略 */ }
+  const categories = () => ((state && state.me && state.me.categories) || savedCats || BASE_CATEGORIES)
+    .map((c) => (c === '給長輩現金' || /^給.+現金$/.test(c) ? '給' + L.elder + '現金' : c));
   const showCat = (c) => (c === '給零用錢' || /^給.+現金$/.test(c || '') ? '給' + L.elder + '現金' : c);
 
   // 畫面上的稱呼：從試算表「設定」表的「管理人稱呼」「長輩稱呼」讀取（後端透過 me 回傳），
@@ -37,7 +42,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-10-03b';
+  const APP_VERSION = '2026-10-03c';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -288,7 +293,7 @@
         ${step('買了什麼？')}
         <div class="cat-grid">
           ${categories().map((c) =>
-            `<button class="cat-btn" data-cat="${esc(c)}" aria-pressed="${c === f.category}">${esc(c)}</button>`
+            `<button class="cat-btn${c === '其他' ? ' cat-wide' : ''}" data-cat="${esc(c)}" aria-pressed="${c === f.category}">${esc(c)}</button>`
           ).join('')}
         </div>
         <label class="note-label" for="note">細項 <span class="hint">（可不填）</span></label>
@@ -1065,6 +1070,12 @@
       // 記下這次打開等了多久，下次打開時交給後端寫進「效能紀錄」
       saveJSON(PERF_KEY, { ms: Date.now() - t0, at: t0, idle: lastMeta.idle, script: lastMeta.script,
         ready: openInfo.ready, mode: openInfo.mode, tries: apiTries });
+      if (state.me.categories) {
+        const changed = JSON.stringify(state.me.categories) !== JSON.stringify(savedCats);
+        saveJSON(CATS_KEY, state.me.categories);
+        savedCats = state.me.categories;
+        if (changed && state.tab === 'add' && state.form && !state.form.category) renderForm();
+      }
       if (state.me.labels) {
         saveJSON(LABELS_KEY, state.me.labels);
         if (applyLabels(state.me.labels) && state.tab === 'overview') renderOverview();
