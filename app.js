@@ -37,7 +37,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-10-03a';
+  const APP_VERSION = '2026-10-03b';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -335,6 +335,10 @@
     }
 
     $('#date').addEventListener('change', (e) => {
+      if (e.target.value > today()) { // iPhone 的日期選單不一定會擋未來日期
+        e.target.value = f.date;
+        return showMessage('日期還沒到，請確認', '最多只能選到今天（' + friendlyDate(today()) + '）。');
+      }
       f.date = e.target.value || today();
       $('#date-text').textContent = friendlyDate(f.date);
     });
@@ -388,6 +392,7 @@
     if (f.mode === 'claim' && !f.payer) return showMessage('還沒選誰出的錢', '請先按最上面「誰出的錢？」的其中一個按鈕。');
     if (m.category && !f.category) return showMessage('還沒選分類', '請先按上面「買了什麼？」的其中一個按鈕。');
     if (!f.amount) return showMessage('還沒輸入金額', '請用數字按鈕輸入金額。');
+    if (f.date > today()) return showMessage('日期還沒到，請確認', '最多只能選到今天。');
     if (!state.requestId) state.requestId = newRequestId();
 
     const payerName = f.payer && f.payer !== 'self' ? ((state.me.payers || []).find((x) => x.userId === f.payer) || {}).name : '';
@@ -846,8 +851,8 @@
         </section>
 
         <section class="summary-block">
-          <div class="summary-label">🧾 ${esc(d.labels.manager)}還沒付的代墊款　<b>${money(d.pendingTotal)} 元</b></div>
-          ${d.pending.length ? '' : '<p>（沒有）</p>'}
+          ${d.pending.length ? `<div class="summary-label">🧾 ${esc(d.labels.manager)}還沒付的代墊款　<b>${money(d.pendingTotal)} 元</b></div>`
+            : '<div class="summary-label">✅ 目前沒有欠任何人</div>'}
           ${d.pending.map((g) => `
             <div class="summary-person">
               <div class="summary-person-head"><span>${esc(g.name)}</span><span>${money(g.total)} 元</span></div>
@@ -867,7 +872,7 @@
               <span>${esc(showCat(c.category))}</span>
               <div class="bar-track"><div class="bar-fill" style="width:${(c.amount / max * 100).toFixed(1)}%"></div></div>
               <span class="bar-value">${money(c.amount)}</span>
-            </div>`).join('') || '<p>（沒有）</p>'}
+            </div>${c.detail ? `<div class="summary-item">${esc(c.detail)}</div>` : ''}`).join('') || '<p>（沒有）</p>'}
         </section>
       </div>
     `;
