@@ -42,7 +42,7 @@
   ];
 
   const $ = (sel) => document.querySelector(sel);
-  const APP_VERSION = '2026-10-03d';
+  const APP_VERSION = '2026-10-21a';
   // 「傳總表到群組」按鈕：Nicole 確認文字範本後改成 true
   const SEND_SUMMARY_ENABLED = true;
   const dlog = window.__debugLog || function () {}; // 診斷模式（?debug=1）才有作用
@@ -854,6 +854,7 @@
       <div class="summary">
         <h2 class="summary-title">${esc(d.labels.elder)}基金總表 <span class="summary-date">${esc(shortDate(d.date))} 更新</span></h2>
         ${d.period ? `<p class="summary-period">${esc(shortDate(d.period.date))} 從${esc(d.labels.elder)}帳戶領出 ${money(d.period.amount)} 元</p>` : ''}
+        ${d.lastPeriodText ? `<p class="summary-last">${esc(d.lastPeriodText)}</p>` : ''}
 
         <section class="summary-block">
           <div class="summary-label">💰 ${esc(d.labels.manager)}手上現金</div>
@@ -870,10 +871,10 @@
             </div>`).join('')}
         </section>
 
-        <section class="summary-block">
-          <div class="summary-label">✅ 已結清</div>
-          ${d.settled.length ? d.settled.map((p) => `<div class="summary-settled">${esc(p.name)}${p.date ? ' <span class="summary-settled-date">' + esc(shortDate(p.date)) + ' 已結清</span>' : ''}</div>`).join('') : '<div class="summary-settled">（沒有）</div>'}
-        </section>
+        ${(d.settledNow || []).length ? `<section class="summary-block">
+          <div class="summary-label">✅ 這次結清</div>
+          ${d.settledNow.map((p) => `<div class="summary-settled">${esc(p.name)} <span class="summary-settled-date">${esc(shortDate(p.date))} 已結清</span></div>`).join('')}
+        </section>` : ''}
 
         <section class="summary-block">
           <div class="summary-label">📊 本期各分類支出${d.period ? '（' + esc(shortDate(d.period.date)) + '～' + esc(shortDate(d.date)) + '）' : ''}　<b>共 ${money(d.monthTotal)} 元</b></div>

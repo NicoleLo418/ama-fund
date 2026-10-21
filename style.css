@@ -249,3 +249,4 @@ details > summary { cursor: pointer; padding: 8px 0; font-weight: 700; min-heigh
 /* 分類名稱較長（例如「給阿母現金」）時不要折行 */
 .bar-row { grid-template-columns: 5.2em 1fr auto; }
 .bar-row > span:first-child { white-space: nowrap; }
+.summary-last { font-size: 17px; color: var(--muted); margin: -8px 0 12px; }
