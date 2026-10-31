@@ -1,0 +1,36 @@
+# 巡檢：每小時檢查網站和後端是否正常；失敗時 GitHub 會寄 email 給 Nicole
+# 只讀公開網址，不需要任何密碼，也不會修改任何東西
+name: 巡檢
+
+on:
+  schedule:
+    - cron: '17 * * * *'   # 每小時的 17 分（UTC）
+  workflow_dispatch:        # 也可以在 GitHub 上手動執行
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 檢查網站與後端
+        run: |
+          SITE=https://nicolelo418.github.io/ama-fund
+          check() {
+            curl -fsS --max-time 20 -o /dev/null "$SITE/?t=$(date +%s)" || { echo "網站（家族記帳）打不開"; return 1; }
+            curl -fsS --max-time 20 -o /dev/null "$SITE/stock.html?t=$(date +%s)" || { echo "網站（股票帳）打不開"; return 1; }
+            CFG=$(curl -fsS --max-time 20 "$SITE/config.js?t=$(date +%s)") || { echo "讀不到 config.js"; return 1; }
+            API=$(echo "$CFG" | grep -oE "API_URL: *'[^']+'" | sed -E "s/API_URL: *'//; s/'$//")
+            echo "網站使用的後端：$API"
+            [ -n "$API" ] || { echo "config.js 裡找不到 API_URL"; return 1; }
+            curl -fsS --max-time 20 "$API" | grep -q '"ok":true' || { echo "後端連不上或回應不對：$API"; return 1; }
+            echo "✅ 網站與後端都正常"
+          }
+          for i in 1 2 3; do
+            if check; then exit 0; fi
+            echo "第 $i 次檢查失敗，60 秒後再試"; sleep 60
+          done
+          echo "::error::巡檢失敗：家人的記帳 App 可能打不開了（見上方訊息）"
+          exit 1
